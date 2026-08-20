@@ -45,3 +45,8 @@ export interface TooltipData {
   risque: number;
   top_cb_fl: number;
 }
+
+export interface GeoJSONFeatureCollection {
+  type: "FeatureCollection";
+  features: PrevisionFeature[];
+}

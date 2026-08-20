@@ -1,5 +1,3 @@
-// frontend/src/App.tsx
-
 import { useEffect, useState } from "react";
 import Carte from "./components/Carte";
 import InfoPanel from "./components/InfoPanel";
@@ -17,11 +15,14 @@ function App() {
   const [tooltip, setTooltip] = useState<{ data: TooltipData; x: number; y: number } | null>(null);
 
   useEffect(() => {
+    // La base URL est automatiquement configurée par Vite pour GitHub Pages
+    const base = import.meta.env.BASE_URL;
+
     const fetchData = async () => {
       try {
         const [pointsResponse, surfacesResponse] = await Promise.all([
-          fetch("/previsions_orages_points.json"),
-          fetch("/previsions_orages_surfaces.json"),
+          fetch(`${base}previsions_orages_points.json`),
+          fetch(`${base}previsions_orages_surfaces.json`),
         ]);
 
         if (!pointsResponse.ok || !surfacesResponse.ok) {
@@ -35,7 +36,11 @@ function App() {
         setSurfacesData(surfaces);
 
         if (points.metadata.echeances.length > 0) {
-          setEcheance(points.metadata.echeances[0]);
+          // Sélectionne la première échéance qui contient des points
+          const echeanceAvecPoints = points.metadata.echeances.find((e) =>
+            points.features.some((f) => f.properties.echeance_h === e)
+          );
+          setEcheance(echeanceAvecPoints ?? points.metadata.echeances[0]);
         }
         setLoading(false);
       } catch (err) {
