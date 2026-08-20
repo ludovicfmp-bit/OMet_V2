@@ -1,6 +1,6 @@
 // frontend/src/App.tsx
 
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import Carte from "./components/Carte";
 import InfoPanel from "./components/InfoPanel";
 import Legende from "./components/Legende";

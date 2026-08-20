@@ -1,5 +1,5 @@
 // frontend/src/components/Carte.tsx
-import type { PrevisionGeoJSON, TooltipData, GeoJSONFeatureCollection } from "../types/geojson";
+import type { PrevisionGeoJSON, TooltipData } from "../types/geojson";
 import React, { useEffect, useRef, useState } from "react";
 import * as maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
@@ -91,14 +91,14 @@ const Carte: React.FC<CarteProps> = ({
     );
 
     const pointsGeoJSON = {
-      type: "FeatureCollection",
-      features: pointsFeatures,
-    } as GeoJSONFeatureCollection;
+  type: "FeatureCollection",
+  features: pointsFeatures,
+} as PrevisionGeoJSON;
 
-    const surfacesGeoJSON = {
-      type: "FeatureCollection",
-      features: surfacesFeatures,
-    } as GeoJSONFeatureCollection;
+const surfacesGeoJSON = {
+  type: "FeatureCollection",
+  features: surfacesFeatures,
+} as PrevisionGeoJSON;
 
     // Source des surfaces
     const surfaceSourceId = "surfaces-previsions";
