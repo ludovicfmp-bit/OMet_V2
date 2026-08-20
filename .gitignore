@@ -1,0 +1,31 @@
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+
+# ===== Node.js / React =====
+node_modules/
+dist/
+.vite/
+*.local
+npm-debug.log*
+
+# ===== Fichiers GRIB téléchargés (volumineux) =====
+# On ne versionne pas les fichiers source du modèle, ils peuvent faire plusieurs Mo.
+data/*.grib
+data/*.grib2
+data/*.idx
+data/tmp/
+
+# ===== Logs =====
+*.log
+
+# ===== OS =====
+.DS_Store
+Thumbs.db
+
+# ===== Exception : on garde le fichier de prévisions généré =====
+!data/previsions_orages.json

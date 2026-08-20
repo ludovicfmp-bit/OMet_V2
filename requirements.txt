@@ -1,0 +1,7 @@
+# Dépendances pour le script Python backend (génération des prévisions)
+requests>=2.31
+numpy>=1.26
+pandas>=2.1
+xarray>=2024.1
+cfgrib>=0.9.10
+eccodes>=1.6
