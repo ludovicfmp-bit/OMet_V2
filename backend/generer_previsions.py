@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Genere data/previsions_orages.json depuis les GRIB2 ICON-EU du DWD (MVP sans vent).
+"""Genere data/previsions_orages_points.json et data/previsions_orages_surfaces.json
+depuis les GRIB2 ICON-EU du DWD (MVP sans vent).
 
 Dépendances Python:
     pip install requests numpy eccodes
@@ -35,7 +36,8 @@ GRIB_BASE_URL = "https://opendata.dwd.de/weather/nwp/icon-eu/grib"
 ZONE = {"lon_min": -10.0, "lon_max": 15.0, "lat_min": 40.0, "lat_max": 56.0}
 ECHEANCES = list(range(13))
 TEMP_DIR = Path("tmp_grib")
-OUTPUT_FILE = Path("data/previsions_orages.json")
+OUTPUT_POINTS = Path("data/previsions_orages_points.json")
+OUTPUT_SURFACES = Path("data/previsions_orages_surfaces.json")
 GRID_STEP = 2  # 0.125 degree après sous-échantillonnage, environ 14 km
 REQUEST_TIMEOUT = 180
 RETRIES = 3
@@ -142,7 +144,10 @@ def read_grib(path: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         try:
             ni = int(eccodes.codes_get(gid, "Ni"))
             nj = int(eccodes.codes_get(gid, "Nj"))
-            values = np.asarray(eccodes.codes_get_values(gid), dtype=np.float32).reshape(nj, ni)
+            values = np.asarray(eccodes.codes_get_values(gid), dtype=np.float32)
+            values[~np.isfinite(values)] = np.nan
+            values[np.abs(values) > 1e20] = np.nan
+            values = values.reshape(nj, ni)
             lats = np.asarray(eccodes.codes_get_array(gid, "latitudes"), dtype=np.float64).reshape(nj, ni)
             lons = np.asarray(eccodes.codes_get_array(gid, "longitudes"), dtype=np.float64).reshape(nj, ni)
         finally:
@@ -150,7 +155,6 @@ def read_grib(path: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
 
     lat_1d = lats[:, 0]
     lon_1d = lons[0, :]
-    # Certains GRIB sont rangés nord -> sud et/ou est -> ouest: on les remet en ordre croissant.
     if lat_1d[0] > lat_1d[-1]:
         lat_1d = lat_1d[::-1]
         values = values[::-1, :]
@@ -191,12 +195,41 @@ def load_field(key: str, date: str, cycle: str) -> tuple[np.ndarray, np.ndarray,
     return np.stack(fields), saved_lat, saved_lon
 
 
-def risk(cape: np.ndarray, hourly_precip: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    # Formule MVP sans DLS: 60% CAPE, 40% precip
-    cape_n = np.clip(np.nan_to_num(cape, nan=0.0) / 2500.0, 0.0, 1.0)
-    precip_n = np.clip(np.nan_to_num(hourly_precip, nan=0.0) / 10.0, 0.0, 1.0)
+def risk(
+    cape: np.ndarray,
+    hourly_precip: np.ndarray,
+    cth: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Calcule un risque orageux en excluant les points sans CB."""
+    cape_clean = np.nan_to_num(cape, nan=0.0)
+    precip_clean = np.nan_to_num(hourly_precip, nan=0.0)
+    cth_clean = np.nan_to_num(cth, nan=0.0)
+
+    cape_n = np.clip(cape_clean / 2500.0, 0.0, 1.0)
+    precip_n = np.clip(precip_clean / 10.0, 0.0, 1.0)
+
     score = cape_n * 60.0 + precip_n * 40.0
-    classes = np.select([score >= 75, score >= 55, score >= 35, score >= 15], [4, 3, 2, 1], default=0).astype(np.int8)
+
+    classes = np.select(
+        [
+            score >= 75,
+            score >= 55,
+            score >= 35,
+            score >= 15,
+        ],
+        [4, 3, 2, 1],
+        default=0,
+    ).astype(np.int8)
+
+    cb_present = (
+        np.isfinite(cth)
+        & (cth_clean >= 1000.0)
+        & (cth_clean <= 25000.0)
+    )
+
+    classes = np.where(cb_present, classes, 0)
+    score = np.where(cb_present, score, 0.0)
+
     return score, classes
 
 
@@ -204,52 +237,157 @@ def finite_number(value: float, digits: int = 1) -> float | None:
     return round(float(value), digits) if np.isfinite(value) else None
 
 
-def build_geojson(fields: dict[str, np.ndarray], lat: np.ndarray, lon: np.ndarray, date: str, cycle: str) -> dict[str, Any]:
-    # tot_prec est cumulé depuis le run: la différence entre deux pas est la pluie sur 1 h.
-    total_precip = np.maximum(fields["precip_total"], 0.0)
+def cellule_polygonale(lon: float, lat: float, demi_pas_lon: float, demi_pas_lat: float) -> list:
+    """Retourne le contour GeoJSON d'une cellule centrée sur lon/lat."""
+    return [[
+        [round(lon - demi_pas_lon, 5), round(lat - demi_pas_lat, 5)],
+        [round(lon + demi_pas_lon, 5), round(lat - demi_pas_lat, 5)],
+        [round(lon + demi_pas_lon, 5), round(lat + demi_pas_lat, 5)],
+        [round(lon - demi_pas_lon, 5), round(lat + demi_pas_lat, 5)],
+        [round(lon - demi_pas_lon, 5), round(lat - demi_pas_lat, 5)],
+    ]]
+
+
+def build_geojson(
+    fields: dict[str, np.ndarray],
+    lat: np.ndarray,
+    lon: np.ndarray,
+    date: str,
+    cycle: str,
+) -> dict[str, Any]:
+    """Construit les GeoJSON de points et de surfaces en supprimant les points non convectifs."""
+
+    total_precip = np.maximum(
+        np.nan_to_num(fields["precip_total"], nan=0.0),
+        0.0,
+    )
     hourly_precip = np.empty_like(total_precip)
     hourly_precip[0] = total_precip[0]
-    hourly_precip[1:] = np.maximum(total_precip[1:] - total_precip[:-1], 0.0)
+    hourly_precip[1:] = np.maximum(
+        total_precip[1:] - total_precip[:-1],
+        0.0,
+    )
 
-    score, classes = risk(fields["cape"], hourly_precip)
-    # 1 FL = 100 ft = 30.48 m. Valeur arrondie à la dizaine de FL.
-    top_fl = np.rint(np.maximum(fields["cth"], 0.0) / 30.48 / 10.0).astype(np.int16) * 10
+    cape = np.nan_to_num(fields["cape"], nan=0.0)
+    cth = fields["cth"]
 
-    features: list[dict[str, Any]] = []
+    # Masque de validité du sommet CB.
+    cth_valide = (
+        np.isfinite(cth)
+        & (cth >= 1000.0)
+        & (cth <= 25000.0)
+    )
+
+    # Masque minimal d'activité convective.
+    convection_valide = (
+        cth_valide
+        & (cape >= 100.0)
+        & (hourly_precip >= 0.015)
+    )
+
+    score, classes = risk(
+        fields["cape"],
+        hourly_precip,
+        fields["cth"],
+    )
+
+    classes = np.where(convection_valide, classes, 0)
+    score = np.where(convection_valide, score, 0.0)
+
+    top_fl = np.rint(cth / 30.48 / 10.0).astype(np.int16) * 10
+    top_fl = np.where(cth_valide, top_fl, 0)
+
+    # Calcul du pas de la grille pour les polygones
+    pas_lat = float(np.median(np.diff(lat))) * GRID_STEP
+    pas_lon = float(np.median(np.diff(lon))) * GRID_STEP
+    demi_pas_lat = pas_lat / 2
+    demi_pas_lon = pas_lon / 2
+
+    features_points: list[dict[str, Any]] = []
+    features_surfaces: list[dict[str, Any]] = []
+
     for index, lead in enumerate(ECHEANCES):
         for iy in range(0, len(lat), GRID_STEP):
             for ix in range(0, len(lon), GRID_STEP):
                 level = int(classes[index, iy, ix])
-                # Ne pas écrire les dizaines de milliers de points sans risque dans le JSON.
+
                 if level == 0:
                     continue
-                features.append({
+
+                cb_fl = int(top_fl[index, iy, ix])
+                if cb_fl <= 0:
+                    continue
+
+                cth_value = float(fields["cth"][index, iy, ix])
+                if not np.isfinite(cth_value) or cth_value < 1000:
+                    continue
+
+                if hourly_precip[index, iy, ix] <= 0 and cape[index, iy, ix] < 1500:
+                    continue
+
+                properties = {
+                    "echeance_h": lead,
+                    "cape_ml_jkg": finite_number(cape[index, iy, ix], 0),
+                    "precip_mm_h": finite_number(hourly_precip[index, iy, ix], 1),
+                    "score": finite_number(score[index, iy, ix], 1),
+                    "risque": level,
+                    "top_cb_fl": cb_fl,
+                }
+
+                # Point pour le tooltip
+                features_points.append({
                     "type": "Feature",
-                    "geometry": {"type": "Point", "coordinates": [round(float(lon[ix]), 5), round(float(lat[iy]), 5)]},
+                    "geometry": {
+                        "type": "Point",
+                        "coordinates": [
+                            round(float(lon[ix]), 5),
+                            round(float(lat[iy]), 5),
+                        ],
+                    },
+                    "properties": properties,
+                })
+
+                # Surface (polygone) pour le rendu
+                features_surfaces.append({
+                    "type": "Feature",
+                    "geometry": {
+                        "type": "Polygon",
+                        "coordinates": cellule_polygonale(
+                            float(lon[ix]),
+                            float(lat[iy]),
+                            demi_pas_lon,
+                            demi_pas_lat,
+                        ),
+                    },
                     "properties": {
                         "echeance_h": lead,
-                        "cape_ml_jkg": finite_number(fields["cape"][index, iy, ix], 0),
-                        "precip_mm_h": finite_number(hourly_precip[index, iy, ix], 1),
-                        "score": finite_number(score[index, iy, ix], 1),
                         "risque": level,
-                        "top_cb_fl": int(top_fl[index, iy, ix]),
                     },
                 })
 
+    metadata = {
+        "genere_le": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "modele": "ICON-EU (DWD Open Data)",
+        "cycle_icon_eu": f"{cycle}Z",
+        "date_run": date,
+        "zone": ZONE,
+        "echeances": ECHEANCES,
+        "grid_step": GRID_STEP,
+        "formule": "score = 60% MLCAPE + 40% precipitation horaire; masque HTOP_CON valide",
+        "avertissement": "Prevision experimentale : ne remplace pas les vigilances meteorologiques officielles.",
+    }
+
     return {
-        "type": "FeatureCollection",
-        "metadata": {
-            "genere_le": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "modele": "ICON-EU (DWD Open Data)",
-            "cycle_icon_eu": f"{cycle}Z",
-            "date_run": date,
-            "zone": ZONE,
-            "echeances": ECHEANCES,
-            "grid_step": GRID_STEP,
-            "formule": "score = 60% MLCAPE + 40% précipitation horaire (DLS ignoré dans ce MVP)",
-            "avertissement": "Prévision expérimentale: ne remplace pas les vigilances météorologiques officielles.",
+        "points": {
+            "type": "FeatureCollection",
+            "metadata": metadata,
+            "features": features_points,
         },
-        "features": features,
+        "surfaces": {
+            "type": "FeatureCollection",
+            "metadata": metadata,
+            "features": features_surfaces,
+        },
     }
 
 
@@ -277,14 +415,24 @@ def main() -> None:
             fields[key] = values
 
         assert reference_lat is not None and reference_lon is not None
-        geojson = build_geojson(fields, reference_lat, reference_lon, date, cycle)
-        # Écriture atomique: le dernier fichier valide est conservé en cas de panne.
-        OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
-        temporary_output = OUTPUT_FILE.with_suffix(".json.tmp")
-        with open(temporary_output, "w", encoding="utf-8") as handle:
-            json.dump(geojson, handle, ensure_ascii=False, separators=(",", ":"))
-        temporary_output.replace(OUTPUT_FILE)
-        LOG.info("GeoJSON généré: %s (%s points à risque)", OUTPUT_FILE, len(geojson["features"]))
+        resultat = build_geojson(fields, reference_lat, reference_lon, date, cycle)
+
+        # Écriture atomique
+        OUTPUT_POINTS.parent.mkdir(parents=True, exist_ok=True)
+        OUTPUT_SURFACES.parent.mkdir(parents=True, exist_ok=True)
+
+        tmp_points = OUTPUT_POINTS.with_suffix(".json.tmp")
+        with open(tmp_points, "w", encoding="utf-8") as handle:
+            json.dump(resultat["points"], handle, ensure_ascii=False, separators=(",", ":"))
+        tmp_points.replace(OUTPUT_POINTS)
+
+        tmp_surfaces = OUTPUT_SURFACES.with_suffix(".json.tmp")
+        with open(tmp_surfaces, "w", encoding="utf-8") as handle:
+            json.dump(resultat["surfaces"], handle, ensure_ascii=False, separators=(",", ":"))
+        tmp_surfaces.replace(OUTPUT_SURFACES)
+
+        LOG.info("GeoJSON points généré: %s (%s points)", OUTPUT_POINTS, len(resultat["points"]["features"]))
+        LOG.info("GeoJSON surfaces généré: %s (%s surfaces)", OUTPUT_SURFACES, len(resultat["surfaces"]["features"]))
     finally:
         shutil.rmtree(TEMP_DIR, ignore_errors=True)
 

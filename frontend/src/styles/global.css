@@ -1,0 +1,185 @@
+/* frontend/src/styles/global.css */
+
+:root {
+  --bg-dark: #0e1012;
+  --bg-panel: #15171b;
+  --bg-card: #1c1f24;
+  --text-primary: #e0e0e0;
+  --text-secondary: #a0a0a0;
+  --color-risque-0: transparent;
+  --color-risque-1: #ffd700; /* jaune */
+  --color-risque-2: #ffa500; /* orange */
+  --color-risque-3: #dc143c; /* rouge */
+  --color-risque-4: #9400d3; /* violet */
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: 'Inter', 'Segoe UI', sans-serif;
+  background-color: var(--bg-dark);
+  color: var(--text-primary);
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+}
+
+#root {
+  height: 100%;
+  width: 100%;
+}
+
+/* Conteneur principal de l'application */
+.app-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  position: relative;
+}
+
+/* Carte plein écran */
+.map-container {
+  flex: 1;
+  position: relative;
+}
+
+/* Panneau d'information en haut à gauche */
+.info-panel {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  background: rgba(21, 23, 27, 0.9);
+  backdrop-filter: blur(5px);
+  border-radius: 8px;
+  padding: 12px;
+  z-index: 10;
+  max-width: 260px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+}
+
+.info-panel h3 {
+  margin-bottom: 6px;
+  font-size: 1rem;
+}
+
+.info-panel p {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+
+.info-panel .avertissement {
+  color: #f39c12;
+  font-size: 0.75rem;
+  font-style: italic;
+}
+
+/* Légende en bas à gauche */
+.legende {
+  position: absolute;
+  bottom: 20px;
+  left: 10px;
+  background: rgba(21, 23, 27, 0.9);
+  backdrop-filter: blur(5px);
+  border-radius: 8px;
+  padding: 12px;
+  z-index: 10;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+}
+
+.legende h4 {
+  margin-bottom: 8px;
+  font-size: 0.9rem;
+}
+
+.legende-item {
+  display: flex;
+  align-items: center;
+  margin-bottom: 4px;
+  font-size: 0.8rem;
+}
+
+.legende-color {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  margin-right: 8px;
+  border: 1px solid rgba(255,255,255,0.2);
+}
+
+/* Slider temporel en bas au centre */
+.slider-container {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 80%;
+  max-width: 600px;
+  background: rgba(21, 23, 27, 0.9);
+  backdrop-filter: blur(5px);
+  border-radius: 8px;
+  padding: 12px 20px;
+  z-index: 10;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+}
+
+.slider-container label {
+  display: block;
+  text-align: center;
+  margin-bottom: 8px;
+  font-weight: bold;
+}
+
+.slider-container input[type="range"] {
+  width: 100%;
+  cursor: pointer;
+}
+
+/* Tooltip (info-bulle) */
+.tooltip {
+  position: absolute;
+  background: rgba(30, 34, 42, 0.95);
+  border: 1px solid #444;
+  border-radius: 6px;
+  padding: 10px;
+  pointer-events: none;
+  z-index: 20;
+  font-size: 0.8rem;
+  max-width: 220px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.6);
+}
+
+.tooltip h5 {
+  margin-bottom: 4px;
+  font-size: 0.85rem;
+}
+
+.tooltip ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.tooltip li {
+  margin-bottom: 2px;
+}
+
+/* Responsive mobile */
+@media (max-width: 768px) {
+  .info-panel {
+    max-width: 200px;
+    padding: 8px;
+    font-size: 0.7rem;
+  }
+  .legende {
+    padding: 8px;
+    font-size: 0.7rem;
+  }
+  .slider-container {
+    padding: 8px 12px;
+  }
+}

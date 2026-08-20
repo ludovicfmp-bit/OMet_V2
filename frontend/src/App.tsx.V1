@@ -1,0 +1,70 @@
+// frontend/src/App.tsx
+
+import React, { useEffect, useState } from "react";
+import Carte from "./components/Carte";
+import InfoPanel from "./components/InfoPanel";
+import Legende from "./components/Legende";
+import Slider from "./components/Slider";
+import Tooltip from "./components/Tooltip";
+import type { PrevisionGeoJSON, TooltipData } from "./types/geojson";
+
+function App() {
+  const [data, setData] = useState<PrevisionGeoJSON | null>(null);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
+  const [echeance, setEcheance] = useState<number>(0);
+  const [tooltip, setTooltip] = useState<{ data: TooltipData; x: number; y: number } | null>(null);
+
+  // Charger le fichier GeoJSON depuis le dossier public
+  useEffect(() => {
+    fetch("/previsions_orages.json")
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error(`Erreur HTTP ${response.status}`);
+        }
+        return response.json();
+      })
+      .then((json: PrevisionGeoJSON) => {
+        setData(json);
+        // Définir l'échéance initiale (première disponible)
+        if (json.metadata.echeances.length > 0) {
+          setEcheance(json.metadata.echeances[0]);
+        }
+        setLoading(false);
+      })
+      .catch((err) => {
+        setError(err.message);
+        setLoading(false);
+      });
+  }, []);
+
+  const handleSurvol = (tooltipData: TooltipData | null, x: number, y: number) => {
+    if (tooltipData) {
+      setTooltip({ data: tooltipData, x, y });
+    } else {
+      setTooltip(null);
+    }
+  };
+
+  return (
+    <div className="app-container">
+      <InfoPanel data={data} loading={loading} error={error} />
+      <Carte
+        data={data}
+        echeanceSelectionnee={echeance}
+        onSurvol={handleSurvol}
+      />
+      <Legende />
+      {data && (
+        <Slider
+          echeances={data.metadata.echeances}
+          valeur={echeance}
+          onChange={setEcheance}
+        />
+      )}
+      {tooltip && <Tooltip data={tooltip.data} x={tooltip.x} y={tooltip.y} />}
+    </div>
+  );
+}
+
+export default App;
